@@ -2,6 +2,11 @@ using MtgCollection.Web.Components;
 using MtgCollection.Web.Services;
 using Microsoft.AspNetCore.HttpOverrides;
 
+var cultureInfo = new System.Globalization.CultureInfo("en-GB");
+System.Globalization.CultureInfo.DefaultThreadCurrentCulture = cultureInfo;
+System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = cultureInfo;
+
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
