@@ -1,0 +1,116 @@
+@using MtgCollection.Web.Models
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="dropdown-filter" @ref="containerRef">
+    <button type="button" class="btn btn-outline-secondary" @onclick="ToggleOpen">
+        @Title
+        @if (SelectedValues.Count > 0)
+        {
+            <span class="badge bg-primary ms-1">@SelectedValues.Count</span>
+        }
+    </button>
+
+    @if (IsOpen)
+    {
+        <div class="dropdown-filter-panel">
+            @foreach (var group in Groups)
+            {
+                <div class="dropdown-filter-group">
+
+                    @if (!string.IsNullOrEmpty(group.Label))
+                    {
+                        <div class="dropdown-filter-group-label">@group.Label</div>
+                    }
+                    @foreach (var option in group.Options)
+                    {
+                        <label class="dropdown-filter-option">
+                            <input type="checkbox" checked="@SelectedValues.Contains(option.Value)"
+                                   @onchange="@(e => OnCheckChanged(option.Value, e.Value))" />
+                            @option.Label
+                        </label>
+                    }
+
+                </div>
+
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public List<DropdownGroup> Groups { get; set; } = new();
+    [Parameter] public List<string> SelectedValues { get; set; } = new();
+    [Parameter] public EventCallback<List<string>> SelectedValuesChanged { get; set; }
+
+    private bool IsOpen;
+    private ElementReference containerRef;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<CheckboxDropdown>? dotNetRef;
+    private readonly string instanceId = Guid.NewGuid().ToString();
+
+    private async Task ToggleOpen()
+    {
+        IsOpen = !IsOpen;
+
+        if (IsOpen)
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/clickOutside.js");
+            dotNetRef ??= DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("register", instanceId, dotNetRef, containerRef);
+        }
+        else
+        {
+            await Unregister();
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnOutsideClick()
+    {
+        IsOpen = false;
+        StateHasChanged();
+        await Unregister();
+    }
+
+    private async Task Unregister()
+    {
+        if (module is not null)
+        {
+            await module.InvokeVoidAsync("unregister", instanceId);
+        }
+    }
+
+    private async Task OnCheckChanged(string option, object? checkboxValue)
+    {
+        var isChecked = checkboxValue is bool b && b;
+        var updated = new List<string>(SelectedValues);
+
+        if (isChecked && !updated.Contains(option))
+            updated.Add(option);
+        else if (!isChecked)
+            updated.Remove(option);
+
+        SelectedValues = updated;
+        await SelectedValuesChanged.InvokeAsync(updated);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (module is not null)
+            {
+                await module.InvokeVoidAsync("unregister", instanceId);
+                await module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is already gone (e.g. browser tab closed) — nothing to clean up.
+        }
+
+        dotNetRef?.Dispose();
+    }
+}

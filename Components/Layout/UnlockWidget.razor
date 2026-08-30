@@ -1,0 +1,29 @@
+@using MtgCollection.Web.Services;
+
+@inject AuthState AuthState
+@inject IJSRuntime JS
+
+@if (AuthState.IsUnlocked)
+{
+    <span class="text-success small">Unlocked</span>
+}
+else
+{
+    <input class="form-control form-control-sm d-inline-block" type="password" placeholder="Key" @bind="keyInput"
+           @bind:event="oninput" />
+    <button class="btn btn-sm mt-2 btn-primary w-100" @onclick="TryUnlock">Unlock</button>
+}
+
+@code {
+    private string keyInput = "";
+
+    private async Task TryUnlock()
+    {
+        if (string.IsNullOrWhiteSpace(keyInput)) return;
+
+        var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/authCookie.js");
+        await module.InvokeVoidAsync("setUnlockCookie", keyInput);
+
+        AuthState.Unlock(keyInput);
+    }
+}

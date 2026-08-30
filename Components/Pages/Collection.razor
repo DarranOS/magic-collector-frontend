@@ -1,0 +1,399 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@using MtgCollection.Web.Models
+@using MtgCollection.Web.Services
+@inject CardApiService CardApi
+@inject AuthState AuthState
+
+<h1>Collection</h1>
+
+@if (stats is not null)
+{
+    <div class="d-flex gap-4 mb-2">
+        <div>
+            <div class="text-muted">@(HasActiveFilters() ? "Filtered Cards" : "Total Cards")</div>
+            <div class="fs-3">@stats.TotalCardsOwned</div>
+        </div>
+        <div>
+            <div class="text-muted">@(HasActiveFilters() ? "Filtered Unique" : "unique Cards")</div>
+            <div class="fs-3">@stats.TotalUniqueCards</div>
+        </div>
+        <div>
+            <div class="text-muted">@(HasActiveFilters() ? "Filtered Value" : "Total Value")</div>
+            <div class="fs-3">@stats.TotalCollectionValue.ToString("C")</div>
+        </div>
+    </div>
+
+    @if (!AuthState.IsUnlocked)
+    {
+
+        <div class="alert alert-warning">
+
+            <h3>About this project</h3>
+
+            <p>A simple .NET project. Backend and Postrges are elsewhere. GraphQL lets me pull the data I want quickly. Filters
+                currently don't support multiples </p>
+
+                <p>
+
+                    This app only shows a limited subset of the collection without the key.
+                </p>
+            </div>
+        }
+
+    }
+
+
+    <div class="row g-2 mb-3">
+        <div class="col-auto">
+            <input class="form-control" placeholder="Search name..." @bind="filters.NameSearch" @bind:event="oninput"
+                   @bind:after="ApplyFilters" />
+        </div>
+
+
+        <div class="col-auto">
+            <CheckboxDropdown Title="Rarity" Groups="CardReferenceData.RarityGroups" SelectedValues="filters.Rarity"
+                              SelectedValuesChanged="OnRarityChanged" />
+        </div>
+
+
+        <div class="col-auto">
+            <select class="form-select" @bind="filters.FrameType" @bind:after="ApplyFilters">
+                <option value="">All Frames</option>
+                <option value="Regular">Regular</option>
+                <option value="Showcase">Showcase</option>
+                <option value="Borderless">Borderless</option>
+                <option value="Extended">Extended</option>
+            </select>
+        </div>
+        <div class="col-auto">
+            <CheckboxDropdown Title="Colors" Groups="CardReferenceData.ColorGroups" SelectedValues="filters.Colors"
+                              SelectedValuesChanged="OnColorsChanged" />
+        </div>
+        <div class="col-auto">
+            <select class="form-select" @bind="filters.ColorMode" @bind:after="ApplyFilters">
+                <option value="including">Including these colors</option>
+                <option value="atmost">At most these colors</option>
+                <option value="exactly">Exactly these colors</option>
+            </select>
+        </div>
+        <div class="col-auto">
+            <CheckboxDropdown Title="Type" Groups="CardReferenceData.TypeGroups" SelectedValues="filters.PrimaryTypes"
+                              SelectedValuesChanged="OnPrimaryTypesChanged" />
+        </div>
+        <div class="col-auto">
+            <CheckboxDropdown Title="Subtype" Groups="CardReferenceData.SubtypeGroups" SelectedValues="filters.Subtypes"
+                              SelectedValuesChanged="OnSubtypesChanged" />
+        </div>
+
+        <div class="col-auto">
+            <input class="form-control" placeholder="Type contains..." @bind="filters.TypeSearch" @bind:event="oninput"
+                   @bind:after="ApplyFilters" />
+        </div>
+        <div class="col-auto">
+            <input class="form-control" placeholder="Edition contains..." @bind="filters.Edition" @bind:event="oninput"
+                   @bind:after="ApplyFilters" />
+        </div>
+        <div class="col-auto">
+            <input type="number" class="form-control" placeholder="Min £" @bind="filters.MinPrice"
+                   @bind:after="ApplyFilters" />
+        </div>
+        <div class="col-auto">
+            <input type="number" class="form-control" placeholder="Max £" @bind="filters.MaxPrice"
+                   @bind:after="ApplyFilters" />
+        </div>
+
+        <div class="col-auto d-flex align-items-center">
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="foilsOnly" @bind="filters.FoilsOnly"
+                       @bind:after="ApplyFilters" />
+                <label class="form-check-label" for="foilsOnly">Foils only</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-container">
+
+        @if (loading)
+        {
+            <p>Loading...</p>
+        }
+        else
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th class="row-title">Name</th>
+                        <th class="row-frame">Frame</th>
+                        <th class="row-edition">Edition</th>
+                        <th class="row-quantity">Qty</th>
+                        <th class="row-foil-quantity">Foil Qty</th>
+                        <th class="row-rarity">Rarity</th>
+                        <th class="row-type">Type</th>
+                        <th class="row-color">Color</th>
+                        <th class="row-price">Price</th>
+                        <th class="row-foil-price">Foil Price</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var card in cards)
+                    {
+                        <tr>
+
+                            <td class="row-title">
+                                <span class="card-hover-link" @onmouseenter="() => OnCardHover(card.Id)"
+                                      @onmouseleave="OnCardHoverEnd">
+                                    <a href="@GetScryfallSearchUrl(card.Name)" target="_blank" rel="noopener noreferrer">
+                                        @card.Name
+                                    </a>
+                                    @if (card.FoilQuantity > 0)
+                                    {
+                                        <span class="foil-marker" title="You own a foil copy">
+                                            <svg width="24px" height="24px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <defs>
+                                                    <linearGradient id="foilGradient-@card.Id" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                        <stop offset="0%" stop-color="#fff8dc" />
+                                                        <stop offset="40%" stop-color="#ffd700" />
+                                                        <stop offset="70%" stop-color="#b8860b" />
+                                                        <stop offset="100%" stop-color="#ffd700" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <path fill="url(#foilGradient-@card.Id)" d="M16.926 20.2a1 1 0 0 1-.466-.115l-4.471-2.352-4.471 2.348a1 1 0 0 1-1.451-1.054l.854-4.98L3.3
+                                                10.521a1 1 0 0 1 .555-1.706l5-.727 2.237-4.531A1 1 0 0 1 11.989 3a1 1 0 0 1 .9.558l2.236 4.53 5
+                                                .727a1 1 0 0 1 .555 1.706l-3.618 3.527.854 4.98a1 1 0 0 1-.99 1.172z" />
+                                            </svg>
+                                        </span>
+                                    }
+                                    @if (hoveredCardId == card.Id)
+                                    {
+                                        <img class="card-hover-image" src="@GetScryfallImageUrl(card)" alt="@card.Name" />
+
+                                        @if (IsPotentialDfc(card) && !failedBackFaces.Contains(card.Id))
+                                        {
+                                            <img class="card-hover-image card-hover-image-back" src="@GetScryfallImageUrl(card, "back")"
+                                                 alt="@card.Name (back)" @onerror="() => OnBackFaceError(card.Id)" />
+                                        }
+                                    }
+                                </span>
+                            </td>
+                            <td class="row-frame">@card.FrameType</td>
+                            <td class="row-edition">@card.Edition</td>
+                            <td class="row-quantity">@FormatQuantity(card.Quantity)</td>
+                            <td class="row-foil-quantity">@FormatQuantity(card.FoilQuantity)</td>
+                            <td class="row-rarity">
+                                <span class="rarity-badge rarity-@card.Rarity.ToLower()"
+                                      title="@CardReferenceData.GetRarityName(card.Rarity)">
+                                    <span class="visually-hidden">@CardReferenceData.GetRarityName(card.Rarity)</span>
+                                </span>
+                            </td>
+                            <td class="row-type">@card.CardType</td>
+                            <td>
+                                <div class="pip-container">
+
+                                    @foreach (var color in GetOrderedColors(card.Color))
+                                    {
+                                        <span class="color-pip color-@color.ToLower()" title="@color"></span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="row-price">@card.Price?.ToString("C")</td>
+                            <td class="row-foil-price">@card.FoilPrice?.ToString("C")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (hasNextPage)
+            {
+                <button class="btn btn-secondary" @onclick="LoadMore">Load more</button>
+            }
+        }
+    </div>
+
+
+@code {
+
+    
+
+
+    // ============================================================
+    // State
+    // ============================================================
+    #region State
+
+    private CardFilterState filters = new();
+    private List<Card> cards = new();
+    private string? endCursor;
+    private bool hasNextPage;
+    private bool loading = true;
+    private SummaryStats? stats;
+
+    private int? hoveredCardId;
+    private HashSet<int> failedBackFaces = new();
+
+    #endregion
+
+    // ============================================================
+    // Lifecycle
+    // ============================================================
+    #region Lifecycle
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuthChanged;
+        await ApplyFilters();
+    }
+
+    private async void HandleAuthChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            await ApplyFilters();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChanged;
+    }
+
+    #endregion
+
+    // ============================================================
+    // Data loading
+    // ============================================================
+    #region Data Loading
+
+    private async Task ApplyFilters()
+    {
+        loading = true;
+        var page = await CardApi.GetCardsAsync(filters);
+        cards = page.Nodes;
+        hasNextPage = page.PageInfo?.HasNextPage ?? false;
+        endCursor = page.PageInfo?.EndCursor;
+        @* stats = await CardApi.GetSummaryStatsAsync(); *@
+        stats = await CardApi.GetSummaryStatsAsync(filters);
+        loading = false;
+    }
+
+    private async Task LoadMore()
+    {
+        var page = await CardApi.GetCardsAsync(filters, endCursor);
+        cards.AddRange(page.Nodes);
+        hasNextPage = page.PageInfo?.HasNextPage ?? false;
+        endCursor = page.PageInfo?.EndCursor;
+    }
+
+    #endregion
+
+    // ============================================================
+    // Filter dropdown handlers (Rarity / Type / Subtype)
+    // Each just writes the selection into `filters` and re-queries.
+    // ============================================================
+    #region Filter Handlers
+
+    private async Task OnRarityChanged(List<string> values)
+    {
+        filters.Rarity = values;
+        await ApplyFilters();
+    }
+
+    private async Task OnPrimaryTypesChanged(List<string> values)
+    {
+        filters.PrimaryTypes = values;
+        await ApplyFilters();
+    }
+
+    private async Task OnSubtypesChanged(List<string> values)
+    {
+        filters.Subtypes = values;
+        await ApplyFilters();
+    }
+
+    private async Task OnColorsChanged(List<string> values)
+    {
+        filters.Colors = values;
+        await ApplyFilters();
+    }
+
+    #endregion
+
+    // ============================================================
+    // Card hover preview (image popup + DFC back face)
+    // ============================================================
+    #region Hover Preview
+
+    private void OnCardHover(int cardId) => hoveredCardId = cardId;
+    private void OnCardHoverEnd() => hoveredCardId = null;
+
+    private bool IsPotentialDfc(Card card) => card.Name.Contains(" // ");
+
+    private void OnBackFaceError(int cardId) => failedBackFaces.Add(cardId);
+
+    #endregion
+
+    // ============================================================
+    // Display helpers (raw stored value -> what the user sees)
+    // ============================================================
+    #region Display Helpers
+
+    private bool HasActiveFilters() =>
+        !string.IsNullOrWhiteSpace(filters.NameSearch) ||
+        filters.Rarity.Count > 0 ||
+        filters.Colors.Count > 0 ||
+        !string.IsNullOrWhiteSpace(filters.Edition) ||
+        filters.PrimaryTypes.Count > 0 ||
+        filters.Subtypes.Count > 0 ||
+        !string.IsNullOrWhiteSpace(filters.TypeSearch) ||
+        filters.MinPrice is not null ||
+        filters.MaxPrice is not null ||
+        filters.FoilsOnly;
+    // Rarity is stored as a single letter (C/U/R/M) but shown as a full word
+    // in the table cell's tooltip/screen-reader text.
+
+    private static string FormatQuantity(int quantity) => quantity == 0 ? "" : quantity.ToString();
+
+    private static string FormatPrice(decimal? price) =>
+    price is null or 0 ? "-" : price.Value.ToString("C");
+
+    private static string GetScryfallSearchUrl(string cardName)
+    {
+        var query = Uri.EscapeDataString($"!\"{cardName}\"");
+        return $"https://scryfall.com/search?q={query}";
+    }
+
+    private static string GetScryfallImageUrl(Card card, string face = "front")
+    {
+        var faceParam = face == "back" ? "&face=back" : "";
+
+        if (card.ScryfallId is Guid id)
+        {
+            return $"https://api.scryfall.com/cards/{id}?format=image&version=normal{faceParam}";
+        }
+
+        var query = Uri.EscapeDataString(card.Name);
+        return $"https://api.scryfall.com/cards/named?exact={query}&format=image&version=normal{faceParam}";
+    }
+
+    private static readonly string[] WubrgOrder = { "White", "Blue", "Black", "Red", "Green" };
+
+    private static List<string> GetOrderedColors(string? color)
+    {
+        if (string.IsNullOrWhiteSpace(color)) return new List<string>();
+
+        return color
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .OrderBy(c =>
+            {
+                var index = Array.IndexOf(WubrgOrder, c);
+                return index == -1 ? int.MaxValue : index;
+            })
+            .ToList();
+    }
+
+    #endregion
+
+
+
+}

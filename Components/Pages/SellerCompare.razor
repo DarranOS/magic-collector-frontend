@@ -1,0 +1,88 @@
+@page "/seller-compare"
+@rendermode InteractiveServer
+@using MtgCollection.Web.Models
+@using MtgCollection.Web.Services
+@inject CardApiService CardApi
+
+<h1>Compare Seller Stock</h1>
+
+<p>
+    Paste the seller's page source (right-click the offers table → Inspect,
+    then copy the outer HTML of the <code>#UserOffersTable</code> element) below.
+</p>
+
+<textarea class="form-control mb-2" rows="6" @bind="pastedHtml" @bind:event="oninput"></textarea>
+<p class="text-muted">Captured length: @pastedHtml.Length characters</p>
+<button class="btn btn-primary mb-3" @onclick="Compare" disabled="@comparing">Compare</button>
+
+
+
+@if (comparing)
+{
+    <p>Comparing...</p>
+}
+else if (results is not null)
+{
+    <p>@results.Count(r => !r.Owned) missing out of @results.Count parsed.</p>
+
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Edition</th>
+                <th>Foil</th>
+                <th>Price</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in results)
+            {
+                <tr class="@(r.Owned ? "table-success" : "table-danger")">
+                    <td>@r.Listing.Name</td>
+                    <td>@r.Listing.Edition</td>
+                    <td>@(r.Listing.IsFoil ? "Foil" : "")</td>
+                    <td>@r.Listing.Price?.ToString("C")</td>
+                    <td>@(r.Owned ? $"Owned ({r.OwnedQuantity})" : "Missing")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private string pastedHtml = "";
+    private bool comparing;
+    private List<SellerMatchResult>? results;
+
+    private async Task Compare()
+    {
+        comparing = true;
+
+        var listings = CardmarketParser.Parse(pastedHtml);
+        var names = listings.Select(l => l.Name).Distinct().ToList();
+
+        var ownedCards = await CardApi.GetCardsByNamesAsync(names);
+        var ownedByName = ownedCards.GroupBy(c => c.Name).ToDictionary(g => g.Key, g => g.ToList());
+
+        results = listings.Select(listing =>
+        {
+            var owned = ownedByName.TryGetValue(listing.Name, out var matches)
+                ? matches
+                : new List<Card>();
+
+            var relevantQty = listing.IsFoil
+                ? owned.Sum(c => c.FoilQuantity)
+                : owned.Sum(c => c.Quantity);
+
+            return new SellerMatchResult
+            {
+                Listing = listing,
+                Owned = relevantQty > 0,
+                OwnedQuantity = relevantQty
+            };
+        }).ToList();
+
+        comparing = false;
+    }
+}
